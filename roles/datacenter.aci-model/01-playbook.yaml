@@ -1,0 +1,39 @@
+- name: Clean config
+  hosts: '*apic1'
+  gather_facts: no
+  connection: local
+  vars:
+    aci_login: &aci_login
+      hostname: '{{ apic_host }}'
+      username: '{{ apic_username }}'
+      private_key: '/home/sd/ansible/datacenter.aci-model/admin.key'
+      validate_certs: no
+  tasks:
+  - name: 
+    aci_tenant:
+      <<: *aci_login
+      tenant: '{{ item.tenant_name }}'
+      state: absent
+    with_items: '{{ aci_topology|aci_listify("tenant") }}'
+
+- name: Deploy topology using ACI model
+  hosts: '*apic1'
+  gather_facts: no
+
+  roles:
+  - role: datacenter.aci-model
+    username: admin
+    aci_model_data: '{{ aci_topology }}'
+    tags: aci
+
+- name: Deploy topology using NXOS model
+  hosts: 'n7k'
+  gather_facts: no
+  
+  roles:
+  - role: nxos
+    username: admin
+    nxos_model_data: '{{ nxos_topology }}'
+    tags: nxos
+
+# vim: ts=2: sw=2: et

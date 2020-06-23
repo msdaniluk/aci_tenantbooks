@@ -1,0 +1,226 @@
+fabric01:
+  hosts:
+    apic1:
+      apic_host: 172.16.109.70
+      apic_username: admin
+    n7k:
+      transport: nxapi
+      ansible_host: 172.16.105.5
+      ansible_user: admin
+      ansible_password: password
+  vars:
+    apic_use_proxy: no
+    apic_validate_certs: no
+    nxos_use_proxy: no
+    nxos_topology:
+      features:
+        - nxapi
+        - ospf
+        - interface-vlan
+        - lacp
+        - lldp
+      routes:
+      - prefix: 0.0.0.0/0
+        next_hop: 192.168.101.254
+        vrf: autolab_pod1_epg1
+      - prefix: 0.0.0.0/0
+        next_hop: 192.168.101.254
+        vrf: autolab_pod2_epg1
+      - prefix: 0.0.0.0/0
+        next_hop: 192.168.102.254
+        vrf: autolab_pod1_epg2
+      - prefix: 0.0.0.0/0
+        next_hop: 192.168.103.254
+        vrf: autolab_pod2_epg3
+      interface:
+      - name: eth1/19/1
+        description: pod1_epg1
+        phy_mode: layer3
+        ipv4: 192.168.101.1/24
+        mac: 0000.dead.0001
+        admin_state: up
+        vrf: autolab_pod1_epg1
+      - name: eth1/19/2
+        description: pod1_epg2
+        phy_mode: layer3
+        ipv4: 192.168.102.1/24
+        mac: 0000.dead.0002
+        admin_state: up
+        vrf: autolab_pod1_epg2
+      - name: eth1/19/3
+        description: pod2_epg1
+        phy_mode: layer3
+        ipv4: 192.168.101.2/24
+        mac: 0000.dead.0003
+        admin_state: up
+        vrf: autolab_pod2_epg1
+      - name: eth1/19/4
+        description: pod2_epg3
+        phy_mode: layer3
+        ipv4: 192.168.103.1/24
+        mac: 0000.dead.0004
+        admin_state: up
+        vrf: autolab_pod2_epg3
+    aci_topology:
+      access_policy:
+      - switch_policy_profile:
+        - name: ansible-101
+          leaf_selector:
+          - name: Leaf101
+            from: 101
+            to: 101
+          interface_selector_profile:
+          - name: ansible_leaf101
+        - name: ansible-111
+          leaf_selector:
+          - name: Leaf111
+            from: 111
+            to: 111
+          interface_selector_profile:
+          - name: ansible_leaf111
+      - interface_policy_lldp:
+        - name: LLDP_ON
+          receive_state: 1
+          transmit_state: 1
+      - interface_policy_policy_group_access:
+        - name: ansible_if_pg
+          lldp: LLDP_ON
+          aep: ansible_aep
+      - interface_policy_profile:
+        - name: ansible_leaf101
+          interface_selector:
+          - name: n7k_pod1
+            int_card: 1
+            int_to: 24
+            int_from: 23
+            policy_group: ansible_if_pg
+            policy_group_type: accportgrp
+        - name: ansible_leaf111
+          interface_selector:
+          - name: n7k_pod2
+            int_card: 1
+            int_to: 24
+            int_from: 23
+            policy_group: ansible_if_pg
+            policy_group_type: accportgrp
+      - vlan_pool:
+        - name: ansible_pool
+          alloc: static
+          encap_block:
+          - from: 3800
+            to: 3899
+      - aep:
+        - name: ansible_aep
+          domain: 
+          - name: ansible_phydom
+            type: phys
+      - physical_domain:
+        - name: ansible_phydom
+          vlan_pool: ansible_pool
+          vlan_pool_alloc: static
+
+      tenant:
+      - name: AutoLab
+        description: ACI as Code. Made in Ansible 
+        contract:
+        - name: epg1_epg2
+          scope: global
+          subject:
+          - name: allow_all
+            filter:
+            - name: ip
+              entry:
+              - name: ip
+                ether_type: ip
+        - name: epg2_epg3
+          scope: global
+          subject:
+          - name: allow_all
+            filter:
+            - name: ip
+              entry:
+              - name: ip
+                ether_type: ip
+        - name: epg1_epg3
+          scope: global
+          subject:
+          - name: allow_all
+            filter:
+            - name: ip
+              entry:
+              - name: ip
+                ether_type: ip
+        app:
+        - name: APP1
+          epg:
+          - name: EPG1
+            bd: BD1
+            contract:
+            - name: epg1_epg2
+              type: consumer
+            - name: epg1_epg3
+              type: provider
+            static_path:
+            - pod: 1
+              path: topology/pod-1/paths-101/pathep-[eth1/23]
+              encap: vlan-3801
+              mode: untagged
+            - pod: 2
+              path: topology/pod-2/paths-111/pathep-[eth1/23]
+              encap: vlan-3801
+              mode: untagged
+            domain:
+            - name: ansible_phydom
+              type: phys
+          - name: EPG2
+            bd: BD2
+            contract:
+            - name: epg1_epg2
+              type: provider
+            - name: epg2_epg3
+              type: consumer
+            static_path:
+            - pod: 1
+              path: topology/pod-1/paths-101/pathep-[eth1/24]
+              encap: vlan-3802
+              mode: untagged
+            domain:
+            - name: ansible_phydom
+              type: phys
+          - name: EPG3
+            bd: BD3
+            contract:
+            - name: epg1_epg3
+              type: consumer
+            - name: epg2_epg3
+              type: provider
+            static_path:
+            - pod: 2
+              path: topology/pod-2/paths-111/pathep-[eth1/24]
+              encap: vlan-3803
+              mode: untagged
+            domain:
+            - name: ansible_phydom
+              type: phys
+        bd:
+        - name: BD1
+          subnet: 
+          - name: 192.168.101.254
+            mask: 24
+            scope: private,shared
+          vrf: VRF1
+        - name: BD2
+          subnet: 
+          - name: 192.168.102.254
+            mask: 24
+            scope: private,shared
+          vrf: VRF1
+        - name: BD3
+          subnet:
+          - name: 192.168.103.254
+            mask: 24
+            scope: private,shared
+          vrf: VRF2
+        vrf:
+        - name: VRF1
+        - name: VRF2

@@ -6,6 +6,7 @@ Topologies available are:
 1. single VRF, multiple EPGs
 
 ![Topology 1](https://github.com/msdaniluk/aci_tenantbooks/blob/master/topologies/topology-01-small.png)
+
 2. single VRF, multiple EPGs
 
 ![Topology 2](https://github.com/msdaniluk/aci_tenantbooks/blob/master/topologies/topology-02-small.png)

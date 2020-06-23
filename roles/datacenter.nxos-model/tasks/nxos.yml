@@ -1,0 +1,188 @@
+---
+
+- name: NXOS config model
+
+  # We prepare an nxos_provider anchor for convenience
+  vars:
+    nxos_provider: &nxos_provider
+      username: 'admin'
+      password: 'P@ssw0rd'
+      transport: nxapi
+      validate_certs: no  
+      
+  block:
+  - name: Enable NX-API
+    nxos_nxapi:
+      <<: *nxos_provider
+      enable_http: yes
+      enable_https: yes
+      state: present
+    vars:  
+      ansible_connection: network_cli
+      ansible_network_os: nxos
+
+  - name: Enable features
+    nxos_config:
+      <<: *nxos_provider      
+      lines:
+      - feature {{ item }}
+    with_items: '{{ nxos_model_data.features }}'
+  
+  - name: Default Interface Config
+    nxos_config:
+      <<: *nxos_provider
+      lines:
+      - default interface {{ item.interface_name }}
+    with_items: '{{ nxos_model_data|aci_listify("interface") }}'
+  
+  - name: Config phy interface
+    nxos_interface:
+      <<: *nxos_provider
+      interface: '{{ item.interface_name }}'
+      description: '{{ item.interface_description }}'
+      mode: '{{ item.interface_phy_mode }}'
+      mtu: '{{ item.interface_mtu | default(omit) }}'
+      admin_state: "{{ item.interface_admin_state }}"
+      state: present
+    with_items: '{{ nxos_model_data|aci_listify("interface") }}'
+    ignore_errors: yes
+
+  - name: configure L2 interfaces
+    nxos_l2_interface:
+      <<: *nxos_provider
+      interface: '{{ item.interface_name }}'
+      mode: '{{ item.interface_mode }}'
+      trunk_vlans: '{{ item.inteface_trunk_vlans }}'
+      state: present
+    with_items: '{{ nxos_model_data|aci_listify("interface_l2") }}'
+    ignore_errors: yes
+
+  - name: Create port-channels
+    nxos_interface:
+      <<: *nxos_provider
+      interface: '{{ item.pc_interface_name }}'
+      admin_state: up
+      mode: layer2
+      state: present
+    with_items: '{{ nxos_model_data|aci_listify("pc_interface") }}'
+
+  - name: add interfaces to PO
+    nxos_linkagg:
+      <<: *nxos_provider
+      mode: '{{ item.pc_interface_mode }}'
+      group: '{{ item.pc_interface_id }}'
+      members:  '{{ item.pc_interface_member }}'
+      state: present
+    with_items: '{{ nxos_model_data|aci_listify("pc_interface") }}'
+
+  - name: configure vrfs
+    nxos_config:
+      <<: *nxos_provider
+      lines:
+      -  vrf context {{ item.interface_vrf }} 
+      -  interface {{ item.interface_name }} ; vrf member {{ item.interface_vrf }}
+    with_items: '{{ nxos_model_data|aci_listify("interface") }}'
+    ignore_errors: yes
+
+  - name: configure L3 interfaces
+    nxos_l3_interface:
+      <<: *nxos_provider
+      name: '{{ item.interface_name }}'
+      ipv4: '{{ item.interface_ipv4 }}'
+      state: present
+    with_items: '{{ nxos_model_data|aci_listify("interface") }}'
+    ignore_errors: yes
+
+  - name: configure mac address on interface
+    nxos_config:
+      <<: *nxos_provider
+      lines: 
+      - interface {{ item.interface_name }} ; mac-address {{ item.interface_mac }}
+    with_items: '{{ nxos_model_data|aci_listify("interface") }}'
+    ignore_errors: yes
+  
+  - name: admin up interfaces
+    nxos_interface:
+      <<: *nxos_provider
+      interface: '{{ item.interface_name }}'
+      admin_state: up
+      state: present
+    with_items: '{{ nxos_model_data|aci_listify("interface") }}'
+
+  - name: configure default routes
+    nxos_static_route:
+      <<: *nxos_provider
+      prefix: "{{ item.routes_prefix }}"
+      next_hop: "{{ item.routes_next_hop }}"
+      vrf: "{{ item.routes_vrf }}"
+      state: present
+    with_items: '{{ nxos_model_data|aci_listify("routes") }}'
+
+  - name: CONFIGURE OSPF PROCESS ID AND AREA AND ROUTER ID
+    nxos_ospf_vrf:
+      <<: *nxos_provider
+      ospf: "{{ item.protocols_ospf_process_id }}"
+      router_id: "{{ item.protocols_ospf_router_id }}"
+    with_items: '{{ nxos_model_data|aci_listify("protocols", "ospf") }}'  
+  
+  - name: ASSOCIATE INTERFACES WITH OSPF PROCESS
+    nxos_interface_ospf:
+      <<: *nxos_provider
+      interface: "{{ item.protocols_ospf_interfaces_name }}"
+      ospf: "{{ item.protocols_ospf_process_id }}"
+      area: "{{ item.protocols_ospf_interfaces_area }}"
+    with_items: '{{ nxos_model_data|aci_listify("protocols", "ospf", "interfaces") }}'       
+  
+  - name: CONFIGURE OSPF INTERFACES NETWORK P2P
+    nxos_config:
+      <<: *nxos_provider
+      lines: ip ospf network {{ item.protocols_ospf_interfaces_network_type }}  
+      parents:
+        - 'interface {{ item.protocols_ospf_interfaces_name }}'
+    with_items: '{{ nxos_model_data|aci_listify("protocols", "ospf", "interfaces") }}'
+ 
+  - name: Configure BGP
+    nxos_bgp:
+      <<: *nxos_provider
+      asn: "{{ item.protocols_bgp_localAS}}"
+      router_id: "{{ item.protocols_bgp_routerID }}"
+      state: present
+    with_items: '{{ nxos_model_data|aci_listify("protocols", "bgp", "neighbor") }}'
+
+  
+  - name: Configure BGP peer
+    nxos_bgp_neighbor:
+      <<: *nxos_provider
+      asn: "{{ item.protocols_bgp_localAS }}"
+      neighbor: "{{ item.protocols_bgp_neighbor_neighborIP }}"
+      local_as: "{{ item.protocols_bgp_localAS }}"
+      remote_as: "{{ item.protocols_bgp_neighbor_remoteAS }}"
+      vrf: "{{ item.protocols_bgp_neighbor_vrf }}"
+      update_source: "{{ item.protocols_bgp_neighbor_source_if }}"
+      state: present
+    with_items: '{{ nxos_model_data|aci_listify("protocols", "bgp", "neighbor") }}'
+ 
+  - name: configure RR client
+    nxos_bgp_neighbor_af:
+      asn:  "{{ item.protocols_bgp_localAS }}"
+      neighbor: "{{ item.protocols_bgp_neighbor_neighborIP }}"
+      afi: "{{ item.protocols_bgp_neighbor_AF }}"
+      safi: "{{ item.protocols_bgp_neighbor_SAF }}"
+      vrf: "{{ item.protocols_bgp_neighbor_vrf }}"
+      state: present
+    with_items: '{{ nxos_model_data|aci_listify("protocols", "bgp", "neighbor") }}'
+  
+  #- name: Configure AF:SAF 
+  #  nxos_config:
+  #    <<: *nxos_provider
+  #    lines:
+  #    - router bgp {{ item.protocols_bgp_localAS }} ; vrf {{  }} ; neighbor {{}} ; address-family {{}} {{}}  
+
+
+  - name: save cfg
+    nxos_config:
+      <<: *nxos_provider
+      lines: copy run start
+
+
+# vim: ts=2: sw=2: et
